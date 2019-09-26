@@ -685,12 +685,6 @@ unsigned DescriptorRequirementsBitsFromFormat(VkFormat fmt) {
 bool CoreChecks::ValidateDrawState(const DescriptorSet *descriptor_set, const std::map<uint32_t, descriptor_req> &bindings,
                                    const std::vector<uint32_t> &dynamic_offsets, const CMD_BUFFER_STATE *cb_node,
                                    const char *caller, std::string *error) const {
-    using DescriptorClass = cvdescriptorset::DescriptorClass;
-    using BufferDescriptor = cvdescriptorset::BufferDescriptor;
-    using ImageDescriptor = cvdescriptorset::ImageDescriptor;
-    using ImageSamplerDescriptor = cvdescriptorset::ImageSamplerDescriptor;
-    using SamplerDescriptor = cvdescriptorset::SamplerDescriptor;
-    using TexelDescriptor = cvdescriptorset::TexelDescriptor;
     for (auto binding_pair : bindings) {
         auto binding = binding_pair.first;
         DescriptorSetLayout::ConstBindingIterator binding_it(descriptor_set->GetLayout().get(), binding);
@@ -708,217 +702,229 @@ bool CoreChecks::ValidateDrawState(const DescriptorSet *descriptor_set, const st
             // or the view could have been destroyed
             continue;
         }
+        if (!ValidateDescriptorSetBindingData(cb_node, descriptor_set, dynamic_offsets, binding, binding_pair.second, caller,
+                                              error))
+            return false;
+    }
+    return true;
+}
 
-        // Copy the range, the end range is subject to update based on variable length descriptor arrays.
-        cvdescriptorset::IndexRange index_range = binding_it.GetGlobalIndexRange();
-        auto array_idx = 0;  // Track array idx if we're dealing with array descriptors
+bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_node, const DescriptorSet *descriptor_set,
+                                                  const std::vector<uint32_t> &dynamic_offsets, uint32_t binding,
+                                                  descriptor_req reqs, const char *caller, std::string *error) const {
+    using DescriptorClass = cvdescriptorset::DescriptorClass;
+    using BufferDescriptor = cvdescriptorset::BufferDescriptor;
+    using ImageDescriptor = cvdescriptorset::ImageDescriptor;
+    using ImageSamplerDescriptor = cvdescriptorset::ImageSamplerDescriptor;
+    using SamplerDescriptor = cvdescriptorset::SamplerDescriptor;
+    using TexelDescriptor = cvdescriptorset::TexelDescriptor;
 
-        if (binding_it.IsVariableDescriptorCount()) {
-            // Only validate the first N descriptors if it uses variable_count
-            index_range.end = index_range.start + descriptor_set->GetVariableDescriptorCount();
-        }
+    DescriptorSetLayout::ConstBindingIterator binding_it(descriptor_set->GetLayout().get(), binding);
+    // Copy the range, the end range is subject to update based on variable length descriptor arrays.
+    cvdescriptorset::IndexRange index_range = binding_it.GetGlobalIndexRange();
+    auto array_idx = 0;  // Track array idx if we're dealing with array descriptors
 
-        for (uint32_t i = index_range.start; i < index_range.end; ++i, ++array_idx) {
-            uint32_t index = i - index_range.start;
-            const auto *descriptor = descriptor_set->GetDescriptorFromGlobalIndex(i);
+    if (binding_it.IsVariableDescriptorCount()) {
+        // Only validate the first N descriptors if it uses variable_count
+        index_range.end = index_range.start + descriptor_set->GetVariableDescriptorCount();
+    }
 
-            if (descriptor->GetClass() == DescriptorClass::InlineUniform) {
-                // Can't validate the descriptor because it may not have been updated.
-                continue;
-            } else if (!descriptor->updated) {
-                std::stringstream error_str;
-                error_str << "Descriptor in binding #" << binding << " index " << index
-                          << " is being used in draw but has never been updated via vkUpdateDescriptorSets() or a similar call.";
-                *error = error_str.str();
-                return false;
-            } else {
-                auto descriptor_class = descriptor->GetClass();
-                if (descriptor_class == DescriptorClass::GeneralBuffer) {
-                    // Verify that buffers are valid
-                    auto buffer = static_cast<const BufferDescriptor *>(descriptor)->GetBuffer();
-                    auto buffer_node = GetBufferState(buffer);
-                    if (!buffer_node) {
-                        std::stringstream error_str;
-                        error_str << "Descriptor in binding #" << binding << " index " << index << " references invalid buffer "
-                                  << buffer << ".";
-                        *error = error_str.str();
-                        return false;
-                    } else if (!buffer_node->sparse) {
-                        for (auto mem_binding : buffer_node->GetBoundMemory()) {
-                            if (!GetDevMemState(mem_binding)) {
-                                std::stringstream error_str;
-                                error_str << "Descriptor in binding #" << binding << " index " << index << " uses buffer " << buffer
-                                          << " that references invalid memory " << mem_binding << ".";
-                                *error = error_str.str();
-                                return false;
-                            }
+    for (uint32_t i = index_range.start; i < index_range.end; ++i, ++array_idx) {
+        uint32_t index = i - index_range.start;
+        const auto *descriptor = descriptor_set->GetDescriptorFromGlobalIndex(i);
+
+        if (descriptor->GetClass() == DescriptorClass::InlineUniform) {
+            // Can't validate the descriptor because it may not have been updated.
+            continue;
+        } else if (!descriptor->updated) {
+            std::stringstream error_str;
+            error_str << "Descriptor in binding #" << binding << " index " << index
+                      << " is being used in draw but has never been updated via vkUpdateDescriptorSets() or a similar call.";
+            *error = error_str.str();
+            return false;
+        } else {
+            auto descriptor_class = descriptor->GetClass();
+            if (descriptor_class == DescriptorClass::GeneralBuffer) {
+                // Verify that buffers are valid
+                auto buffer = static_cast<const BufferDescriptor *>(descriptor)->GetBuffer();
+                auto buffer_node = GetBufferState(buffer);
+                if (!buffer_node) {
+                    std::stringstream error_str;
+                    error_str << "Descriptor in binding #" << binding << " index " << index << " references invalid buffer "
+                              << buffer << ".";
+                    *error = error_str.str();
+                    return false;
+                } else if (!buffer_node->sparse) {
+                    for (auto mem_binding : buffer_node->GetBoundMemory()) {
+                        if (!GetDevMemState(mem_binding)) {
+                            std::stringstream error_str;
+                            error_str << "Descriptor in binding #" << binding << " index " << index << " uses buffer " << buffer
+                                      << " that references invalid memory " << mem_binding << ".";
+                            *error = error_str.str();
+                            return false;
                         }
                     }
-                    if (descriptor->IsDynamic()) {
-                        // Validate that dynamic offsets are within the buffer
-                        auto buffer_size = buffer_node->createInfo.size;
-                        auto range = static_cast<const BufferDescriptor *>(descriptor)->GetRange();
-                        auto desc_offset = static_cast<const BufferDescriptor *>(descriptor)->GetOffset();
-                        auto dyn_offset = dynamic_offsets[binding_it.GetDynamicOffsetIndex() + array_idx];
-                        if (VK_WHOLE_SIZE == range) {
-                            if ((dyn_offset + desc_offset) > buffer_size) {
-                                std::stringstream error_str;
-                                error_str << "Dynamic descriptor in binding #" << binding << " index " << index << " uses buffer "
-                                          << buffer << " with update range of VK_WHOLE_SIZE has dynamic offset " << dyn_offset
-                                          << " combined with offset " << desc_offset << " that oversteps the buffer size of "
-                                          << buffer_size << ".";
-                                *error = error_str.str();
-                                return false;
-                            }
-                        } else {
-                            if ((dyn_offset + desc_offset + range) > buffer_size) {
-                                std::stringstream error_str;
-                                error_str << "Dynamic descriptor in binding #" << binding << " index " << index << " uses buffer "
-                                          << buffer << " with dynamic offset " << dyn_offset << " combined with offset "
-                                          << desc_offset << " and range " << range << " that oversteps the buffer size of "
-                                          << buffer_size << ".";
-                                *error = error_str.str();
-                                return false;
-                            }
+                }
+                if (descriptor->IsDynamic()) {
+                    // Validate that dynamic offsets are within the buffer
+                    auto buffer_size = buffer_node->createInfo.size;
+                    auto range = static_cast<const BufferDescriptor *>(descriptor)->GetRange();
+                    auto desc_offset = static_cast<const BufferDescriptor *>(descriptor)->GetOffset();
+                    auto dyn_offset = dynamic_offsets[binding_it.GetDynamicOffsetIndex() + array_idx];
+                    if (VK_WHOLE_SIZE == range) {
+                        if ((dyn_offset + desc_offset) > buffer_size) {
+                            std::stringstream error_str;
+                            error_str << "Dynamic descriptor in binding #" << binding << " index " << index << " uses buffer "
+                                      << buffer << " with update range of VK_WHOLE_SIZE has dynamic offset " << dyn_offset
+                                      << " combined with offset " << desc_offset << " that oversteps the buffer size of "
+                                      << buffer_size << ".";
+                            *error = error_str.str();
+                            return false;
                         }
-                    }
-                } else if (descriptor_class == DescriptorClass::ImageSampler || descriptor_class == DescriptorClass::Image) {
-                    VkImageView image_view;
-                    VkImageLayout image_layout;
-                    if (descriptor_class == DescriptorClass::ImageSampler) {
-                        image_view = static_cast<const ImageSamplerDescriptor *>(descriptor)->GetImageView();
-                        image_layout = static_cast<const ImageSamplerDescriptor *>(descriptor)->GetImageLayout();
                     } else {
-                        image_view = static_cast<const ImageDescriptor *>(descriptor)->GetImageView();
-                        image_layout = static_cast<const ImageDescriptor *>(descriptor)->GetImageLayout();
-                    }
-                    auto reqs = binding_pair.second;
-
-                    auto image_view_state = GetImageViewState(image_view);
-                    if (nullptr == image_view_state) {
-                        // Image view must have been destroyed since initial update. Could potentially flag the descriptor
-                        //  as "invalid" (updated = false) at DestroyImageView() time and detect this error at bind time
-                        std::stringstream error_str;
-                        error_str << "Descriptor in binding #" << binding << " index " << index << " is using imageView "
-                                  << report_data->FormatHandle(image_view).c_str() << " that has been destroyed.";
-                        *error = error_str.str();
-                        return false;
-                    }
-                    const auto &image_view_ci = image_view_state->create_info;
-
-                    if (reqs & DESCRIPTOR_REQ_ALL_VIEW_TYPE_BITS) {
-                        if (~reqs & (1 << image_view_ci.viewType)) {
-                            // bad view type
+                        if ((dyn_offset + desc_offset + range) > buffer_size) {
                             std::stringstream error_str;
-                            error_str << "Descriptor in binding #" << binding << " index " << index
-                                      << " requires an image view of type " << StringDescriptorReqViewType(reqs) << " but got "
-                                      << string_VkImageViewType(image_view_ci.viewType) << ".";
-                            *error = error_str.str();
-                            return false;
-                        }
-
-                        if (!(reqs & image_view_state->descriptor_format_bits)) {
-                            // bad component type
-                            std::stringstream error_str;
-                            error_str << "Descriptor in binding #" << binding << " index " << index << " requires "
-                                      << StringDescriptorReqComponentType(reqs)
-                                      << " component type, but bound descriptor format is " << string_VkFormat(image_view_ci.format)
-                                      << ".";
+                            error_str << "Dynamic descriptor in binding #" << binding << " index " << index << " uses buffer "
+                                      << buffer << " with dynamic offset " << dyn_offset << " combined with offset " << desc_offset
+                                      << " and range " << range << " that oversteps the buffer size of " << buffer_size << ".";
                             *error = error_str.str();
                             return false;
                         }
                     }
+                }
+            } else if (descriptor_class == DescriptorClass::ImageSampler || descriptor_class == DescriptorClass::Image) {
+                VkImageView image_view;
+                VkImageLayout image_layout;
+                if (descriptor_class == DescriptorClass::ImageSampler) {
+                    image_view = static_cast<const ImageSamplerDescriptor *>(descriptor)->GetImageView();
+                    image_layout = static_cast<const ImageSamplerDescriptor *>(descriptor)->GetImageLayout();
+                } else {
+                    image_view = static_cast<const ImageDescriptor *>(descriptor)->GetImageView();
+                    image_layout = static_cast<const ImageDescriptor *>(descriptor)->GetImageLayout();
+                }
 
-                    if (!disabled.image_layout_validation) {
-                        auto image_node = GetImageState(image_view_ci.image);
-                        assert(image_node);
-                        // Verify Image Layout
-                        // No "invalid layout" VUID required for this call, since the optimal_layout parameter is UNDEFINED.
-                        bool hit_error = false;
-                        VerifyImageLayout(cb_node, image_node, image_view_state->normalized_subresource_range,
-                                          image_view_ci.subresourceRange.aspectMask, image_layout, VK_IMAGE_LAYOUT_UNDEFINED,
-                                          caller, kVUIDUndefined, "VUID-VkDescriptorImageInfo-imageLayout-00344", &hit_error);
-                        if (hit_error) {
-                            *error =
-                                "Image layout specified at vkUpdateDescriptorSet* or vkCmdPushDescriptorSet* time "
-                                "doesn't match actual image layout at time descriptor is used. See previous error callback for "
-                                "specific details.";
-                            return false;
-                        }
-                    }
+                auto image_view_state = GetImageViewState(image_view);
+                if (nullptr == image_view_state) {
+                    // Image view must have been destroyed since initial update. Could potentially flag the descriptor
+                    //  as "invalid" (updated = false) at DestroyImageView() time and detect this error at bind time
+                    std::stringstream error_str;
+                    error_str << "Descriptor in binding #" << binding << " index " << index << " is using imageView "
+                              << report_data->FormatHandle(image_view).c_str() << " that has been destroyed.";
+                    *error = error_str.str();
+                    return false;
+                }
+                const auto &image_view_ci = image_view_state->create_info;
 
-                    // Verify Sample counts
-                    if ((reqs & DESCRIPTOR_REQ_SINGLE_SAMPLE) && image_view_state->samples != VK_SAMPLE_COUNT_1_BIT) {
+                if (reqs & DESCRIPTOR_REQ_ALL_VIEW_TYPE_BITS) {
+                    if (~reqs & (1 << image_view_ci.viewType)) {
+                        // bad view type
                         std::stringstream error_str;
                         error_str << "Descriptor in binding #" << binding << " index " << index
-                                  << " requires bound image to have VK_SAMPLE_COUNT_1_BIT but got "
-                                  << string_VkSampleCountFlagBits(image_view_state->samples) << ".";
+                                  << " requires an image view of type " << StringDescriptorReqViewType(reqs) << " but got "
+                                  << string_VkImageViewType(image_view_ci.viewType) << ".";
                         *error = error_str.str();
                         return false;
                     }
-                    if ((reqs & DESCRIPTOR_REQ_MULTI_SAMPLE) && image_view_state->samples == VK_SAMPLE_COUNT_1_BIT) {
-                        std::stringstream error_str;
-                        error_str << "Descriptor in binding #" << binding << " index " << index
-                                  << " requires bound image to have multiple samples, but got VK_SAMPLE_COUNT_1_BIT.";
-                        *error = error_str.str();
-                        return false;
-                    }
-                } else if (descriptor_class == DescriptorClass::TexelBuffer) {
-                    auto texel_buffer = static_cast<const TexelDescriptor *>(descriptor);
-                    auto buffer_view = GetBufferViewState(texel_buffer->GetBufferView());
 
-                    if (nullptr == buffer_view) {
-                        std::stringstream error_str;
-                        error_str << "Descriptor in binding #" << binding << " index " << index << " is using bufferView "
-                                  << buffer_view << " that has been destroyed.";
-                        *error = error_str.str();
-                        return false;
-                    }
-                    auto buffer = buffer_view->create_info.buffer;
-                    auto buffer_state = GetBufferState(buffer);
-                    if (!buffer_state) {
-                        std::stringstream error_str;
-                        error_str << "Descriptor in binding #" << binding << " index " << index << " is using buffer "
-                                  << buffer_state << " that has been destroyed.";
-                        *error = error_str.str();
-                        return false;
-                    }
-                    auto reqs = binding_pair.second;
-                    auto format_bits = DescriptorRequirementsBitsFromFormat(buffer_view->create_info.format);
-
-                    if (!(reqs & format_bits)) {
+                    if (!(reqs & image_view_state->descriptor_format_bits)) {
                         // bad component type
                         std::stringstream error_str;
                         error_str << "Descriptor in binding #" << binding << " index " << index << " requires "
                                   << StringDescriptorReqComponentType(reqs) << " component type, but bound descriptor format is "
-                                  << string_VkFormat(buffer_view->create_info.format) << ".";
+                                  << string_VkFormat(image_view_ci.format) << ".";
                         *error = error_str.str();
                         return false;
                     }
                 }
-                if (descriptor_class == DescriptorClass::ImageSampler || descriptor_class == DescriptorClass::PlainSampler) {
-                    // Verify Sampler still valid
-                    VkSampler sampler;
-                    if (descriptor_class == DescriptorClass::ImageSampler) {
-                        sampler = static_cast<const ImageSamplerDescriptor *>(descriptor)->GetSampler();
-                    } else {
-                        sampler = static_cast<const SamplerDescriptor *>(descriptor)->GetSampler();
-                    }
-                    if (!ValidateSampler(sampler)) {
-                        std::stringstream error_str;
-                        error_str << "Descriptor in binding #" << binding << " index " << index << " is using sampler " << sampler
-                                  << " that has been destroyed.";
-                        *error = error_str.str();
+
+                if (!disabled.image_layout_validation) {
+                    auto image_node = GetImageState(image_view_ci.image);
+                    assert(image_node);
+                    // Verify Image Layout
+                    // No "invalid layout" VUID required for this call, since the optimal_layout parameter is UNDEFINED.
+                    bool hit_error = false;
+                    VerifyImageLayout(cb_node, image_node, image_view_state->normalized_subresource_range,
+                                      image_view_ci.subresourceRange.aspectMask, image_layout, VK_IMAGE_LAYOUT_UNDEFINED, caller,
+                                      kVUIDUndefined, "VUID-VkDescriptorImageInfo-imageLayout-00344", &hit_error);
+                    if (hit_error) {
+                        *error =
+                            "Image layout specified at vkUpdateDescriptorSet* or vkCmdPushDescriptorSet* time "
+                            "doesn't match actual image layout at time descriptor is used. See previous error callback for "
+                            "specific details.";
                         return false;
-                    } else {
-                        const SAMPLER_STATE *sampler_state = GetSamplerState(sampler);
-                        if (sampler_state->samplerConversion && !descriptor->IsImmutableSampler()) {
-                            std::stringstream error_str;
-                            error_str << "sampler (" << sampler << ") in the descriptor set (" << descriptor_set->GetSet()
-                                      << ") contains a YCBCR conversion (" << sampler_state->samplerConversion
-                                      << ") , then the sampler MUST also exists as an immutable sampler.";
-                            *error = error_str.str();
-                        }
+                    }
+                }
+
+                // Verify Sample counts
+                if ((reqs & DESCRIPTOR_REQ_SINGLE_SAMPLE) && image_view_state->samples != VK_SAMPLE_COUNT_1_BIT) {
+                    std::stringstream error_str;
+                    error_str << "Descriptor in binding #" << binding << " index " << index
+                              << " requires bound image to have VK_SAMPLE_COUNT_1_BIT but got "
+                              << string_VkSampleCountFlagBits(image_view_state->samples) << ".";
+                    *error = error_str.str();
+                    return false;
+                }
+                if ((reqs & DESCRIPTOR_REQ_MULTI_SAMPLE) && image_view_state->samples == VK_SAMPLE_COUNT_1_BIT) {
+                    std::stringstream error_str;
+                    error_str << "Descriptor in binding #" << binding << " index " << index
+                              << " requires bound image to have multiple samples, but got VK_SAMPLE_COUNT_1_BIT.";
+                    *error = error_str.str();
+                    return false;
+                }
+            } else if (descriptor_class == DescriptorClass::TexelBuffer) {
+                auto texel_buffer = static_cast<const TexelDescriptor *>(descriptor);
+                auto buffer_view = GetBufferViewState(texel_buffer->GetBufferView());
+
+                if (nullptr == buffer_view) {
+                    std::stringstream error_str;
+                    error_str << "Descriptor in binding #" << binding << " index " << index << " is using bufferView "
+                              << buffer_view << " that has been destroyed.";
+                    *error = error_str.str();
+                    return false;
+                }
+                auto buffer = buffer_view->create_info.buffer;
+                auto buffer_state = GetBufferState(buffer);
+                if (!buffer_state) {
+                    std::stringstream error_str;
+                    error_str << "Descriptor in binding #" << binding << " index " << index << " is using buffer " << buffer_state
+                              << " that has been destroyed.";
+                    *error = error_str.str();
+                    return false;
+                }
+                auto format_bits = DescriptorRequirementsBitsFromFormat(buffer_view->create_info.format);
+
+                if (!(reqs & format_bits)) {
+                    // bad component type
+                    std::stringstream error_str;
+                    error_str << "Descriptor in binding #" << binding << " index " << index << " requires "
+                              << StringDescriptorReqComponentType(reqs) << " component type, but bound descriptor format is "
+                              << string_VkFormat(buffer_view->create_info.format) << ".";
+                    *error = error_str.str();
+                    return false;
+                }
+            }
+            if (descriptor_class == DescriptorClass::ImageSampler || descriptor_class == DescriptorClass::PlainSampler) {
+                // Verify Sampler still valid
+                VkSampler sampler;
+                if (descriptor_class == DescriptorClass::ImageSampler) {
+                    sampler = static_cast<const ImageSamplerDescriptor *>(descriptor)->GetSampler();
+                } else {
+                    sampler = static_cast<const SamplerDescriptor *>(descriptor)->GetSampler();
+                }
+                if (!ValidateSampler(sampler)) {
+                    std::stringstream error_str;
+                    error_str << "Descriptor in binding #" << binding << " index " << index << " is using sampler " << sampler
+                              << " that has been destroyed.";
+                    *error = error_str.str();
+                    return false;
+                } else {
+                    const SAMPLER_STATE *sampler_state = GetSamplerState(sampler);
+                    if (sampler_state->samplerConversion && !descriptor->IsImmutableSampler()) {
+                        std::stringstream error_str;
+                        error_str << "sampler (" << sampler << ") in the descriptor set (" << descriptor_set->GetSet()
+                                  << ") contains a YCBCR conversion (" << sampler_state->samplerConversion
+                                  << ") , then the sampler MUST also exists as an immutable sampler.";
+                        *error = error_str.str();
                     }
                 }
             }
