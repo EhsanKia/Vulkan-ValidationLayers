@@ -945,6 +945,9 @@ class ValidationStateTracker : public ValidationObject {
     void UpdateStateCmdDrawType(CMD_BUFFER_STATE* cb_state, VkPipelineBindPoint bind_point);
     void UpdateDrawState(CMD_BUFFER_STATE* cb_state, const VkPipelineBindPoint bind_point);
     void UpdateAllocateDescriptorSetsData(const VkDescriptorSetAllocateInfo*, cvdescriptorset::AllocateDescriptorSetsData*);
+    void RecordValidateDescriptopsetsInQueueSubmit(VkCommandBuffer commandBuffer, VkDescriptorSet descriptorSet,
+                                                   const std::vector<uint32_t>& dynamicOffsets, uint32_t binding,
+                                                   descriptor_req reqs);
 
     DeviceFeatures enabled_features = {};
     // Device specific data

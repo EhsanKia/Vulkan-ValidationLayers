@@ -4388,3 +4388,12 @@ void ValidationStateTracker::ResetCommandBufferPushConstantDataIfIncompatible(CM
         cb_state->push_constant_data.resize(size_needed, 0);
     }
 }
+
+void ValidationStateTracker::RecordValidateDescriptopsetsInQueueSubmit(VkCommandBuffer commandBuffer, VkDescriptorSet descriptorSet,
+                                                                       const std::vector<uint32_t> &dynamicOffsets,
+                                                                       uint32_t binding, descriptor_req reqs) {
+    CMD_BUFFER_STATE *cb_state = GetCBState(commandBuffer);
+    assert(cb_state);
+    cb_state->validate_descriptopsets_in_queuesubmit[descriptorSet].dynamicOffsets = dynamicOffsets;
+    cb_state->validate_descriptopsets_in_queuesubmit[descriptorSet].bindings[binding] = reqs;
+}

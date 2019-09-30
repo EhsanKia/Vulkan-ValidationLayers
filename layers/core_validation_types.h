@@ -1314,6 +1314,14 @@ struct LAST_BOUND_STATE {
     }
 };
 
+struct VALIDATE_DESCRIPTORSET_IN_QUEUESUBMIT {
+    VALIDATE_DESCRIPTORSET_IN_QUEUESUBMIT() {}
+
+    // one dynamic offset per dynamic descriptor bound to this CB
+    std::vector<uint32_t> dynamicOffsets;
+    std::map<uint32_t, descriptor_req> bindings;
+};
+
 static inline bool CompatForSet(uint32_t set, const LAST_BOUND_STATE &a, const std::vector<PipelineLayoutCompatId> &b) {
     bool result = (set < a.per_set.size()) && (set < b.size()) && (a.per_set[set].compat_id_for_set == b[set]);
     return result;
@@ -1477,6 +1485,7 @@ struct CMD_BUFFER_STATE : public BASE_NODE {
     //  each individual CMD_NODE referencing its own "lastBound" state
     // Store last bound state for Gfx & Compute pipeline bind points
     std::map<uint32_t, LAST_BOUND_STATE> lastBound;
+    std::unordered_map<VkDescriptorSet, VALIDATE_DESCRIPTORSET_IN_QUEUESUBMIT> validate_descriptopsets_in_queuesubmit;
 
     uint32_t viewportMask;
     uint32_t scissorMask;

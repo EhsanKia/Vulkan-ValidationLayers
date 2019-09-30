@@ -45,7 +45,7 @@
 bool CoreChecks::ValidateCmdDrawType(VkCommandBuffer cmd_buffer, bool indexed, VkPipelineBindPoint bind_point, CMD_TYPE cmd_type,
                                      const char *caller, VkQueueFlags queue_flags, const char *queue_flag_code,
                                      const char *renderpass_msg_code, const char *pipebound_msg_code,
-                                     const char *dynamic_state_msg_code) const {
+                                     const char *dynamic_state_msg_code) {
     bool skip = false;
     const CMD_BUFFER_STATE *cb_state = GetCBState(cmd_buffer);
     if (cb_state) {

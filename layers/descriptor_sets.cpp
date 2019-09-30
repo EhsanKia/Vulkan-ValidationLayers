@@ -684,7 +684,7 @@ unsigned DescriptorRequirementsBitsFromFormat(VkFormat fmt) {
 // Return true if state is acceptable, or false and write an error message into error string
 bool CoreChecks::ValidateDrawState(const DescriptorSet *descriptor_set, const std::map<uint32_t, descriptor_req> &bindings,
                                    const std::vector<uint32_t> &dynamic_offsets, const CMD_BUFFER_STATE *cb_node,
-                                   const char *caller, std::string *error) const {
+                                   const char *caller, std::string *error) {
     for (auto binding_pair : bindings) {
         auto binding = binding_pair.first;
         DescriptorSetLayout::ConstBindingIterator binding_it(descriptor_set->GetLayout().get(), binding);
@@ -700,6 +700,8 @@ bool CoreChecks::ValidateDrawState(const DescriptorSet *descriptor_set, const st
             (VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT)) {
             // Can't validate the descriptor because it may not have been updated,
             // or the view could have been destroyed
+            ValidationStateTracker::RecordValidateDescriptopsetsInQueueSubmit(cb_node->commandBuffer, descriptor_set->GetSet(),
+                                                                              dynamic_offsets, binding, binding_pair.second);
             continue;
         }
         if (!ValidateDescriptorSetBindingData(cb_node, descriptor_set, dynamic_offsets, binding, binding_pair.second, caller,

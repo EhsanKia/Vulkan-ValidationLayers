@@ -826,7 +826,7 @@ static bool VerifySetLayoutCompatibility(const debug_report_data *report_data, c
 // Validate overall state at the time of a draw call
 bool CoreChecks::ValidateCmdBufDrawState(const CMD_BUFFER_STATE *cb_node, CMD_TYPE cmd_type, const bool indexed,
                                          const VkPipelineBindPoint bind_point, const char *function, const char *pipe_err_code,
-                                         const char *state_err_code) const {
+                                         const char *state_err_code) {
     const auto last_bound_it = cb_node->lastBound.find(bind_point);
     const PIPELINE_STATE *pPipe = nullptr;
     if (last_bound_it != cb_node->lastBound.cend()) {
@@ -2134,6 +2134,20 @@ bool CoreChecks::ValidateCommandBuffersForSubmit(VkQueue queue, const VkSubmitIn
                 cb_node, (int)std::count(current_cmds.begin(), current_cmds.end(), submit->pCommandBuffers[i]),
                 &qfo_image_scoreboards, &qfo_buffer_scoreboards);
             skip |= ValidateQueueFamilyIndices(cb_node, queue);
+
+            for (auto descriptorSet : cb_node->validate_descriptopsets_in_queuesubmit) {
+                const cvdescriptorset::DescriptorSet *set = GetSetNode(descriptorSet.first);
+                for (auto binding : descriptorSet.second.bindings) {
+                    std::string error;
+                    if (!ValidateDescriptorSetBindingData(cb_node, set, descriptorSet.second.dynamicOffsets, binding.first,
+                                                          binding.second, "vkQueueSubmit()", &error)) {
+                        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT,
+                                        HandleToUint64(descriptorSet.first), kVUID_Core_DrawState_DescriptorSetNotUpdated,
+                                        "%s bound the following validation error at %s time: %s",
+                                        report_data->FormatHandle(descriptorSet.first).c_str(), "vkQueueSubmit()", error.c_str());
+                    }
+                }
+            }
 
             // Potential early exit here as bad object state may crash in delayed function calls
             if (skip) {
