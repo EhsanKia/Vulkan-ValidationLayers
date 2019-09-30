@@ -190,6 +190,10 @@ set(BEST_PRACTICES_LIBRARY_FILES
     best_practices.cpp
     best_practices.h)
 
+set(SYNC_VALIDATION_LIBRARY_FILES
+    synchronization_validation.cpp
+    synchronization_validation.h)
+
 if(BUILD_LAYERS)
     AddVkLayer(khronos_validation ""
         ${CHASSIS_LIBRARY_FILES}
@@ -197,7 +201,8 @@ if(BUILD_LAYERS)
         ${OBJECT_LIFETIMES_LIBRARY_FILES}
         ${THREAD_SAFETY_LIBRARY_FILES}
         ${STATELESS_VALIDATION_LIBRARY_FILES}
-        ${BEST_PRACTICES_LIBRARY_FILES})
+        ${BEST_PRACTICES_LIBRARY_FILES}
+        ${SYNC_VALIDATION_LIBRARY_FILES})
 
     # Khronos validation additional dependencies
     target_include_directories(VkLayer_khronos_validation PRIVATE ${GLSLANG_SPIRV_INCLUDE_DIR})
