@@ -156,10 +156,10 @@ class CoreChecks : public ValidationStateTracker {
     bool ValidateBindImageMemory(const VkBindImageMemoryInfo& bindInfo, const char* api_name) const;
     bool ValidateGetPhysicalDeviceDisplayPlanePropertiesKHRQuery(VkPhysicalDevice physicalDevice, uint32_t planeIndex,
                                                                  const char* api_name) const;
-    bool ValidateQuery(VkQueue queue, CMD_BUFFER_STATE* pCB, VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount,
-                       VkQueryResultFlags flags) const;
+    bool ValidateCopyQueryPoolResults(VkQueue queue, CMD_BUFFER_STATE* pCB, VkQueryPool queryPool, uint32_t firstQuery,
+                                      uint32_t queryCount, VkQueryResultFlags flags) const;
     QueryState GetQueryState(const QUEUE_STATE* queue_data, VkQueryPool queryPool, uint32_t queryIndex) const;
-    bool VerifyQueryIsReset(VkQueue queue, VkCommandBuffer commandBuffer, QueryObject query_obj) const;
+    bool VerifyQueryIsReset(VkQueue queue, VkCommandBuffer commandBuffer, QueryObject query_obj, const char* func) const;
     bool ValidateImportSemaphore(VkSemaphore semaphore, const char* caller_name) const;
     bool ValidateBeginQuery(const CMD_BUFFER_STATE* cb_state, const QueryObject& query_obj, VkFlags flags, CMD_TYPE cmd,
                             const char* cmd_name, const char* vuid_queue_flags, const char* vuid_queue_feedback,
@@ -818,7 +818,7 @@ class CoreChecks : public ValidationStateTracker {
                                          uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier* pBufferMemoryBarriers,
                                          uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier* pImageMemoryBarriers);
 
-    void EnqueueVerifyBeginQuery(VkCommandBuffer, const QueryObject& query_obj);
+    void EnqueueVerifyBeginQuery(VkCommandBuffer, const QueryObject& query_obj, const char* func);
     bool PreCallValidateCmdBeginQuery(VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t slot, VkFlags flags);
     void PreCallRecordCmdBeginQuery(VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t slot, VkFlags flags);
     bool PreCallValidateCmdEndQuery(VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t slot);
